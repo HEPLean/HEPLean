@@ -22,10 +22,42 @@ import Mathlib.SetTheory.Cardinal.Basic
 Feynman diagrams are a graphical representation of the terms in the perturbation expansion of
 a quantum field theory.
 
+# References
+
+- The approach we follow is based on:
+  https://arxiv.org/pdf/0908.2675
+
 
 -/
 
 open CategoryTheory
+
+/-!
+
+## The definition of a Feynman graph
+
+-/
+/-- The definition of a Feynman graph. -/
+structure FeynmanGraph where
+  /-- The type of half-edges (or flags). -/
+  H : Finset ℕ
+  /-- The type of edges. -/
+  E : Finset ℕ
+  /-- The type of vertices. -/
+  V : Finset ℕ
+  /-- The map taking half-edges to Edges -/
+  s : H → E
+  /-- The map taking half-edges to Vertices -/
+  t : H → V
+  /-- The involution on edges. -/
+  i : E → E
+  /-- The condition that `s` is an injection. -/
+  s_inj : Function.Injective s
+  /-- The condition that `i` is an involution. -/
+  i_inv : Function.LeftInverse i i
+  /-- The condition that `i` has no fixed points. -/
+  i_no_fixed : ∀ e, i e ≠ e
+
 /-!
 
 ## The definition of Pre Feynman rules
@@ -242,7 +274,7 @@ instance externalDecidable [IsFinitePreFeynmanRule P] (v : P.VertexLabel) :
   `F : Over (P.HalfEdgeLabel × P.EdgeLabel × P.VertexLabel)` for it to be a Feynman diagram.
   This condition corresponds to the vertices of `F` having the correct half-edges associated
   with them. -/
-def DiagramVertexProp {𝓔 𝓥 : Type} (F : Over (P.HalfEdgeLabel × 𝓔 × 𝓥))
+def diagramVertexProp {𝓔 𝓥 : Type} (F : Over (P.HalfEdgeLabel × 𝓔 × 𝓥))
     (f : 𝓥 ⟶ P.VertexLabel) :=
   ∀ v, IsIsomorphic (P.vertexLabelMap (f v)) ((P.preimageVertex v).obj F)
 
@@ -250,12 +282,12 @@ def DiagramVertexProp {𝓔 𝓥 : Type} (F : Over (P.HalfEdgeLabel × 𝓔 × �
   `F : Over (P.HalfEdgeLabel × P.EdgeLabel × P.VertexLabel)` for it to be a Feynman diagram.
   This condition corresponds to the edges of `F` having the correct half-edges associated
   with them. -/
-def DiagramEdgeProp {𝓔 𝓥 : Type} (F : Over (P.HalfEdgeLabel  × 𝓔 × 𝓥))
+def diagramEdgeProp {𝓔 𝓥 : Type} (F : Over (P.HalfEdgeLabel  × 𝓔 × 𝓥))
     (f : 𝓔 ⟶ P.EdgeLabel) :=
   ∀ v, IsIsomorphic (P.edgeLabelMap (f v)) ((P.preimageEdge v).obj F)
 
 lemma diagramVertexProp_iff {𝓔 𝓥 : Type} (F : Over (P.HalfEdgeLabel × 𝓔 × 𝓥))
-    (f : 𝓥 ⟶ P.VertexLabel) : P.DiagramVertexProp F f ↔
+    (f : 𝓥 ⟶ P.VertexLabel) : P.diagramVertexProp F f ↔
     ∀ v, ∃ (κ : (P.vertexLabelMap (f v)).left → ((P.preimageVertex v).obj F).left),
     Function.Bijective κ
     ∧ ((P.preimageVertex v).obj F).hom ∘ κ = (P.vertexLabelMap (f v)).hom := by
@@ -270,7 +302,7 @@ lemma diagramVertexProp_iff {𝓔 𝓥 : Type} (F : Over (P.HalfEdgeLabel × �
   exact ⟨f, fm, hf1, hf2⟩
 
 lemma diagramEdgeProp_iff {𝓔 𝓥 : Type} (F : Over (P.HalfEdgeLabel × 𝓔 × 𝓥))
-    (f : 𝓔 ⟶ P.EdgeLabel) : P.DiagramEdgeProp F f ↔
+    (f : 𝓔 ⟶ P.EdgeLabel) : P.diagramEdgeProp F f ↔
     ∀ v, ∃ (κ : (P.edgeLabelMap (f v)).left → ((P.preimageEdge v).obj F).left),
     Function.Bijective κ
     ∧ ((P.preimageEdge v).obj F).hom ∘ κ = (P.edgeLabelMap (f v)).hom := by
@@ -287,7 +319,7 @@ lemma diagramEdgeProp_iff {𝓔 𝓥 : Type} (F : Over (P.HalfEdgeLabel × 𝓔 
 instance diagramVertexPropDecidable
     [IsFinitePreFeynmanRule P] {𝓔 𝓥 : Type} [Fintype 𝓥] [DecidableEq 𝓥]
     (F : Over (P.HalfEdgeLabel × 𝓔 × 𝓥)) [DecidableEq F.left] [Fintype F.left]
-    (f : 𝓥 ⟶ P.VertexLabel) : Decidable (P.DiagramVertexProp F f) :=
+    (f : 𝓥 ⟶ P.VertexLabel) : Decidable (P.diagramVertexProp F f) :=
   @decidable_of_decidable_of_iff _ _
     (@Fintype.decidableForallFintype _ _ (fun _ => @Fintype.decidableExistsFintype _ _
     (fun _ => @And.decidable _ _ _ (@Fintype.decidablePiFintype _ _
@@ -297,7 +329,7 @@ instance diagramVertexPropDecidable
 instance diagramEdgePropDecidable
     [IsFinitePreFeynmanRule P] {𝓔 𝓥 : Type} [Fintype 𝓔]  [DecidableEq 𝓔]
     (F : Over (P.HalfEdgeLabel × 𝓔 × 𝓥)) [DecidableEq F.left] [Fintype F.left]
-    (f : 𝓔 ⟶ P.EdgeLabel) : Decidable (P.DiagramEdgeProp F f) :=
+    (f : 𝓔 ⟶ P.EdgeLabel) : Decidable (P.diagramEdgeProp F f) :=
   @decidable_of_decidable_of_iff _ _
     (@Fintype.decidableForallFintype _ _ (fun _ => @Fintype.decidableExistsFintype _ _
     (fun _ => @And.decidable _ _ _ (@Fintype.decidablePiFintype _ _
@@ -327,9 +359,9 @@ structure FeynmanDiagram (P : PreFeynmanRule) where
   belongs to, and the vertex they belong to. -/
   𝓱𝓔To𝓔𝓥 : Over (P.HalfEdgeLabel × 𝓔𝓞.left × 𝓥𝓞.left)
   /-- Each edge has the correct type of half edges. -/
-  𝓔Cond : P.DiagramEdgeProp 𝓱𝓔To𝓔𝓥 𝓔𝓞.hom
+  𝓔Cond : P.diagramEdgeProp 𝓱𝓔To𝓔𝓥 𝓔𝓞.hom
   /-- Each vertex has the correct sort of half edges. -/
-  𝓥Cond : P.DiagramVertexProp 𝓱𝓔To𝓔𝓥 𝓥𝓞.hom
+  𝓥Cond : P.diagramVertexProp 𝓱𝓔To𝓔𝓥 𝓥𝓞.hom
 
 namespace FeynmanDiagram
 
@@ -362,8 +394,8 @@ def 𝓱𝓔To𝓥 : Over F.𝓥 := P.toVertex.obj F.𝓱𝓔To𝓔𝓥
 /-- The condition which must be satisfied by maps to form a Feynman diagram. -/
 def Cond {𝓔 𝓥 𝓱𝓔 : Type} (𝓔𝓞 : 𝓔 → P.EdgeLabel) (𝓥𝓞 : 𝓥 → P.VertexLabel)
     (𝓱𝓔To𝓔𝓥 : 𝓱𝓔 → P.HalfEdgeLabel × 𝓔 × 𝓥)  : Prop :=
-  P.DiagramEdgeProp (Over.mk 𝓱𝓔To𝓔𝓥) 𝓔𝓞  ∧
-  P.DiagramVertexProp (Over.mk 𝓱𝓔To𝓔𝓥) 𝓥𝓞
+  P.diagramEdgeProp (Over.mk 𝓱𝓔To𝓔𝓥) 𝓔𝓞  ∧
+  P.diagramVertexProp (Over.mk 𝓱𝓔To𝓔𝓥) 𝓥𝓞
 
 lemma cond_self : Cond F.𝓔𝓞.hom F.𝓥𝓞.hom F.𝓱𝓔To𝓔𝓥.hom :=
   ⟨F.𝓔Cond, F.𝓥Cond⟩
@@ -446,6 +478,9 @@ instance {F : FeynmanDiagram P} [IsFiniteDiagram F] : DecidableEq F.𝓱𝓔 :=
 
 instance {F : FeynmanDiagram P} [IsFiniteDiagram F] (i : F.𝓱𝓔) (j : F.𝓔) :
     Decidable (F.𝓱𝓔To𝓔.hom i = j) :=  IsFiniteDiagram.𝓔DecidableEq (F.𝓱𝓔To𝓔.hom i) j
+
+instance {F : FeynmanDiagram P} [IsFiniteDiagram F] (i : F.𝓱𝓔) (j : F.𝓥) :
+    Decidable (F.𝓱𝓔To𝓥.hom i = j) :=  IsFiniteDiagram.𝓥DecidableEq (F.𝓱𝓔To𝓥.hom i) j
 
 instance fintypeProdHalfEdgeLabel𝓔𝓥 {F : FeynmanDiagram P} [IsFinitePreFeynmanRule P]
     [IsFiniteDiagram F] : DecidableEq (P.HalfEdgeLabel × F.𝓔 × F.𝓥) :=
@@ -533,9 +568,7 @@ lemma ext' {F G : FeynmanDiagram P} {f g : Hom F G} (h𝓔 : f.𝓔𝓞 = g.𝓔
   cases g
   subst h𝓔 h𝓥
   simp_all only [mk.injEq, heq_eq_eq, true_and]
-  ext a : 2
-  simp only [𝓱𝓔] at h𝓱𝓔
-  exact congrFun h𝓱𝓔 a
+  exact Over.OverMorphism.ext h𝓱𝓔
 
 lemma ext {F G : FeynmanDiagram P} {f g : Hom F G} (h𝓔 : f.𝓔 = g.𝓔)
     (h𝓥 : f.𝓥 = g.𝓥) (h𝓱𝓔 : f.𝓱𝓔 = g.𝓱𝓔) : f = g :=
@@ -716,12 +749,12 @@ A feynman diagram is connected if its simple graph is connected.
 /-- A relation on the vertices of Feynman diagrams. The proposition is true if the two
  vertices are not equal and are connected by a single edge. -/
 @[simp]
-def AdjRelation : F.𝓥 → F.𝓥 → Prop := fun x y =>
+def adjRelation : F.𝓥 → F.𝓥 → Prop := fun x y =>
   x ≠ y ∧
   ∃ (a b : F.𝓱𝓔), ((F.𝓱𝓔To𝓔𝓥.hom a).2.1 = (F.𝓱𝓔To𝓔𝓥.hom b).2.1
   ∧ (F.𝓱𝓔To𝓔𝓥.hom a).2.2 = x ∧ (F.𝓱𝓔To𝓔𝓥.hom b).2.2 = y)
 
-instance [IsFiniteDiagram F] : DecidableRel F.AdjRelation := fun _ _ =>
+instance [IsFiniteDiagram F] : DecidableRel F.adjRelation := fun _ _ =>
   @And.decidable _ _ _ $
   @Fintype.decidableExistsFintype _ _ (fun _ => @Fintype.decidableExistsFintype _ _  (
   fun _ => @And.decidable _ _ (instDecidableEq𝓔OfIsFiniteDiagram _ _) $
@@ -731,13 +764,13 @@ instance [IsFiniteDiagram F] : DecidableRel F.AdjRelation := fun _ _ =>
 
 /-- From a Feynman diagram the simple graph showing those vertices which are connected. -/
 def toSimpleGraph : SimpleGraph F.𝓥 where
-  Adj := AdjRelation F
+  Adj := adjRelation F
   symm := by
     intro x y h
     apply And.intro (Ne.symm h.1)
     obtain ⟨a, b, hab⟩ := h.2
     use b, a
-    simp_all only [AdjRelation, ne_eq, and_self]
+    simp_all only [adjRelation, ne_eq, and_self]
   loopless := by
     intro x h
     simp at h

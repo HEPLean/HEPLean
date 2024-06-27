@@ -5,9 +5,15 @@ Authors: Joseph Tooby-Smith
 -/
 import HepLean.FeynmanDiagrams.Basic
 import Mathlib.Data.Real.Basic
+import Mathlib.Algebra.Category.ModuleCat.Basic
+import Mathlib.LinearAlgebra.StdBasis
+import Mathlib.LinearAlgebra.Matrix.ToLin
+import Mathlib.Data.Matrix.Rank
 import Mathlib.Algebra.DirectSum.Module
 import Mathlib.LinearAlgebra.SesquilinearForm
-import Mathlib.LinearAlgebra.Dimension.Finrank
+import Mathlib.Analysis.InnerProductSpace.Orthogonal
+import Mathlib.Analysis.InnerProductSpace.PiL2
+import Mathlib.Tactic.RewriteSearch
 /-!
 # Momentum in Feynman diagrams
 
@@ -24,6 +30,7 @@ vector space.
 ## Note
 
 This section is non-computable as we depend on the norm on `F.HalfEdgeMomenta`.
+
 -/
 
 
@@ -33,6 +40,92 @@ open CategoryTheory
 open PreFeynmanRule
 
 variable {P : PreFeynmanRule} (F : FeynmanDiagram P) [IsFiniteDiagram F]
+
+/-!
+
+## Some aspects of graph theory
+
+- TODO: Move this section.
+
+-/
+
+/-- The map from `Fin 2` to `Type` landing on `F.𝓔` and `F.𝓥`. -/
+def graphVertexMap : Fin 2 → Type := fun i =>
+  match i with
+  | 0 => F.𝓔
+  | 1 => F.𝓥
+
+instance (i : Fin 2) : Fintype (graphVertexMap F i) :=
+  match i with
+  | 0 => IsFiniteDiagram.𝓔Fintype
+  | 1 => IsFiniteDiagram.𝓥Fintype
+
+noncomputable instance (i : Fin 2) : DecidableEq (graphVertexMap F i) :=
+  match i with
+  | 0 =>  IsFiniteDiagram.𝓔DecidableEq
+  | 1 => IsFiniteDiagram.𝓥DecidableEq
+
+/-- The type of all vertices (including centers of edges `F.𝓔`) and
+  actual Feynman-diagram vertices `F.𝓥`. -/
+def graphVertex : Type := Σ i, F.graphVertexMap i
+
+instance : Fintype F.graphVertex := Sigma.instFintype
+
+def graphVertexEquivSum : F.graphVertex ≃ F.𝓔 ⊕ F.𝓥 where
+  toFun x := match x with
+    | ⟨0, x⟩ => Sum.inl x
+    | ⟨1, x⟩ => Sum.inr x
+  invFun x := match x with
+    | Sum.inl x => ⟨0, x⟩
+    | Sum.inr x => ⟨1, x⟩
+  left_inv a := by
+    simp_all only
+    split <;> rename_i x x_1 heq <;> rcases x <;>
+       split at heq <;> simp_all only [Sum.inl.injEq, Sum.inr.injEq]
+  right_inv a := by
+    rcases a <;> simp_all only
+
+
+/-- The incidence matrix for the `F.𝓔`-type vertices of a Feynman diagram. -/
+def incidenceMatrix𝓔 : Matrix F.𝓱𝓔 F.𝓔 ℤ :=
+  fun i j => if F.𝓱𝓔To𝓔.hom i = j then 1 else 0
+
+/-- The incidence matrix for the `F.𝓥`-vertices of a Feynman diagram. -/
+def incidenceMatrix𝓥 : Matrix F.𝓱𝓔 F.𝓥 ℤ :=
+  fun i j => if F.𝓱𝓔To𝓥.hom i = j then 1 else 0
+
+/-- The (unoriented) incidence matrix for a Feynman diagram, considered as an undirected graph. -/
+def incidenceMatrix : Matrix F.𝓱𝓔 F.graphVertex ℤ := fun i j =>
+  match j with
+  | ⟨0, j'⟩ => F.incidenceMatrix𝓔 i j'
+  | ⟨1, j'⟩ => F.incidenceMatrix𝓥 i j'
+
+
+/--
+ The matrix representing the adjacency matrix of the line graph of a Feynman diagram,
+ plus 2 × the identity.
+
+ The rank of this matrix is the same as the rank of the incidence matrix, however
+ it is somewhat easier to deal with since it is indexed soely by half-edges.
+
+ The rank of this matrix is related to the number of loops in a Feynman diagram.
+ -/
+def adjacencyLinePlus2I : Matrix F.𝓱𝓔 F.𝓱𝓔 ℤ := F.incidenceMatrix * F.incidenceMatrix.transpose
+
+/-- Given an equivalence `F.𝓱𝓔 ≃ Fin n`, this converts `adjacencyLinePlus2I` into a
+  string.
+
+  This is provided so that the eigenvectors and eigenvalues of `adjacencyLinePlus2I` can be
+  found using a computer algebra system (e.g. Mathematica), and then imported back into Lean.
+  -/
+def adjacencyLinePlus2IString {n : ℕ} (e : F.𝓱𝓔 ≃ Fin n) : String :=
+  let M (r : F.𝓱𝓔) :=
+    List.map (fun c => toString (F.adjacencyLinePlus2I r (e.symm c))) (Fin.list n)
+  let X :=
+    List.map (fun r => String.intercalate ", " $ M (e.symm r)) (Fin.list n)
+  "{{" ++ String.intercalate "}, {" X++ "}}"
+
+
 
 /-!
 
@@ -47,36 +140,7 @@ We define the direct sum of the edge and vertex momentum spaces.
 
 /-- The type which assocaites to each half-edge a `1`-dimensional vector space.
  Corresponding to that spanned by its momentum.  -/
-def HalfEdgeMomenta : Type :=  F.𝓱𝓔 → ℝ
-
-instance : AddCommGroup F.HalfEdgeMomenta := Pi.addCommGroup
-
-instance : Module ℝ F.HalfEdgeMomenta := Pi.module _ _ _
-
-/-- An auxillary function used to define the Euclidean inner product on `F.HalfEdgeMomenta`. -/
-def euclidInnerAux (x : F.HalfEdgeMomenta) : F.HalfEdgeMomenta →ₗ[ℝ] ℝ where
-  toFun y := ∑ i,  (x i) * (y i)
-  map_add' z y :=
-    show (∑ i, (x i) * (z i + y i)) = (∑ i, x i * z i) + ∑ i, x i * (y i) by
-      simp only [mul_add, Finset.sum_add_distrib]
-  map_smul' c y :=
-    show (∑ i, x i * (c * y i)) = c * ∑ i, x i * y i by
-      rw [Finset.mul_sum]
-      refine Finset.sum_congr rfl (fun _ _  => by ring)
-
-lemma euclidInnerAux_symm (x y : F.HalfEdgeMomenta) :
-    F.euclidInnerAux x y = F.euclidInnerAux y x := Finset.sum_congr rfl (fun _ _ => by ring)
-
-/-- The Euclidean inner product on `F.HalfEdgeMomenta`. -/
-def euclidInner : F.HalfEdgeMomenta →ₗ[ℝ] F.HalfEdgeMomenta →ₗ[ℝ] ℝ where
-  toFun x := F.euclidInnerAux x
-  map_add' x y := by
-    refine LinearMap.ext (fun z  => ?_)
-    simp only [euclidInnerAux_symm, map_add, LinearMap.add_apply]
-  map_smul' c x := by
-    refine LinearMap.ext (fun z  => ?_)
-    simp only [euclidInnerAux_symm, LinearMapClass.map_smul, smul_eq_mul, RingHom.id_apply,
-      LinearMap.smul_apply]
+abbrev HalfEdgeMomenta := EuclideanSpace ℝ F.𝓱𝓔
 
 
 /-- The type which assocaites to each ege a `1`-dimensional vector space.
@@ -85,8 +149,9 @@ def EdgeMomenta : Type := F.𝓔 → ℝ
 
 instance : AddCommGroup F.EdgeMomenta := Pi.addCommGroup
 
-instance : Module ℝ F.EdgeMomenta := Pi.module _ _ _
-
+noncomputable instance : Module ℝ F.EdgeMomenta := Pi.module _ _ _
+/-- The standard `Pi` basis on `F.EdgeMomenta`. -/
+noncomputable def basisEdgeMomenta : Basis F.𝓔 ℝ F.EdgeMomenta := Pi.basisFun _ _
 
 /-- The type which assocaites to each ege a `1`-dimensional vector space.
  Corresponding to that spanned by its total inflowing momentum.  -/
@@ -94,7 +159,10 @@ def VertexMomenta : Type := F.𝓥 → ℝ
 
 instance : AddCommGroup F.VertexMomenta := Pi.addCommGroup
 
-instance : Module ℝ F.VertexMomenta := Pi.module _ _ _
+noncomputable instance : Module ℝ F.VertexMomenta := Pi.module _ _ _
+
+/-- The standard `Pi` basis on `F.VertexMomenta`. -/
+noncomputable def basisVertexMomenta : Basis F.𝓥 ℝ F.VertexMomenta := Pi.basisFun _ _
 
 /-- The map from `Fin 2` to `Type` landing on `EdgeMomenta` and `VertexMomenta`. -/
 def EdgeVertexMomentaMap : Fin 2 → Type := fun i =>
@@ -107,17 +175,28 @@ instance (i : Fin 2) : AddCommGroup (EdgeVertexMomentaMap F i) :=
   | 0 => instAddCommGroupEdgeMomenta F
   | 1 => instAddCommGroupVertexMomenta F
 
-instance (i : Fin 2) : Module ℝ (EdgeVertexMomentaMap F i) :=
+noncomputable instance (i : Fin 2) : Module ℝ (EdgeVertexMomentaMap F i) :=
   match i with
   | 0 => instModuleRealEdgeMomenta F
   | 1 => instModuleRealVertexMomenta F
 
 /-- The direct sum of `EdgeMomenta` and `VertexMomenta`.-/
-def EdgeVertexMomenta : Type := DirectSum (Fin 2) (EdgeVertexMomentaMap F)
+def EdgeVertexMomenta : Type := ∀ i : Fin 2, (EdgeVertexMomentaMap F) i
 
-instance : AddCommGroup F.EdgeVertexMomenta := DirectSum.instAddCommGroup _
+instance : AddCommGroup F.EdgeVertexMomenta := Pi.addCommGroup
 
-instance : Module ℝ F.EdgeVertexMomenta := DirectSum.instModule
+noncomputable instance : Module ℝ F.EdgeVertexMomenta := Pi.module _ _ _
+
+noncomputable def basisEdgeVertexMomentaMap : (i : Fin 2) →
+  Basis (F.graphVertexMap i) ℝ (F.EdgeVertexMomentaMap i) :=
+  fun i => match i with
+  | 0 => F.basisEdgeMomenta
+  | 1 => F.basisVertexMomenta
+
+
+noncomputable def basisEdgeVertexMomenta :
+    Basis (Σ i, F.graphVertexMap i) ℝ F.EdgeVertexMomenta :=
+    Pi.basis F.basisEdgeVertexMomentaMap
 
 
 /-!
@@ -143,6 +222,26 @@ def edgeToHalfEdgeMomenta : F.EdgeMomenta →ₗ[ℝ] F.HalfEdgeMomenta where
   map_add' _ _ := by rfl
   map_smul' _ _ := by rfl
 
+/-- The matrix corresponding to `edgeToHalfEdgeMomenta` in the standard basis. -/
+@[simp]
+noncomputable def edgeToHalfEdgeMomentaMatrix : Matrix F.𝓱𝓔 F.𝓔 ℝ :=
+  (LinearMap.toMatrix F.basisEdgeMomenta
+  (EuclideanSpace.basisFun F.𝓱𝓔 ℝ).toBasis) F.edgeToHalfEdgeMomenta
+
+lemma edgeToHalfEdgeMomenta_eq_edgeToHalfEdgeℤ :
+    F.edgeToHalfEdgeMomentaMatrix = F.incidenceMatrix𝓔.map (Int.cast : ℤ → ℝ) := by
+  apply Matrix.ext
+  intro i j
+  simp only [edgeToHalfEdgeMomentaMatrix, LinearMap.toMatrix, basisEdgeMomenta,
+    EuclideanSpace.basisFun, LinearIsometryEquiv.refl, OrthonormalBasis.coe_toBasis_repr,
+    LinearEquiv.trans_apply, LinearMap.toMatrix'_apply, LinearEquiv.arrowCongr_apply,
+    Basis.equivFun_symm_apply, ite_smul, one_smul, zero_smul, Finset.sum_ite_eq', Finset.mem_univ,
+    ↓reduceIte, Matrix.map_apply, incidenceMatrix𝓔, Functor.const_obj_obj, Int.cast_ite,
+    Int.cast_one, Int.cast_zero]
+  erw [LinearEquiv.refl_apply, Pi.basisFun_apply]
+  rw [LinearMap.stdBasis_apply, ← EuclideanSpace.single_apply]
+  rfl
+
 /-- The linear map from `F.VertexMomenta` to `F.HalfEdgeMomenta` induced by
   the map `F.𝓱𝓔To𝓥.hom`. -/
 def vertexToHalfEdgeMomenta : F.VertexMomenta →ₗ[ℝ] F.HalfEdgeMomenta where
@@ -150,11 +249,103 @@ def vertexToHalfEdgeMomenta : F.VertexMomenta →ₗ[ℝ] F.HalfEdgeMomenta wher
   map_add' _ _ := rfl
   map_smul' _ _ := rfl
 
+/-- The matrix corresponding to `vertexToHalfEdgeMomenta` in the standard basis. -/
+@[simp]
+noncomputable def vertexToHalfEdgeMomentaMatrix : Matrix F.𝓱𝓔 F.𝓥 ℝ :=
+  (LinearMap.toMatrix F.basisVertexMomenta
+  (EuclideanSpace.basisFun F.𝓱𝓔 ℝ).toBasis) F.vertexToHalfEdgeMomenta
+
+lemma vertexToHalfEdgeMomenta_eq_incidenceMatrix𝓥 :
+    F.vertexToHalfEdgeMomentaMatrix = F.incidenceMatrix𝓥.map (Int.cast : ℤ → ℝ) := by
+  apply Matrix.ext
+  intro i j
+  simp only [vertexToHalfEdgeMomentaMatrix, LinearMap.toMatrix, EuclideanSpace.basisFun,
+    LinearIsometryEquiv.refl, OrthonormalBasis.coe_toBasis_repr, LinearEquiv.trans_apply,
+    LinearMap.toMatrix'_apply, LinearEquiv.arrowCongr_apply, Basis.equivFun_symm_apply, ite_smul,
+    one_smul, zero_smul, Finset.sum_ite_eq', Finset.mem_univ, ↓reduceIte, Matrix.map_apply,
+    incidenceMatrix𝓥, Functor.const_obj_obj, Int.cast_ite, Int.cast_one, Int.cast_zero]
+  erw [LinearEquiv.refl_apply, Pi.basisFun_apply]
+  rw [LinearMap.stdBasis_apply, ← EuclideanSpace.single_apply]
+  rfl
+
 /-- The linear map from `F.EdgeVertexMomenta` to `F.HalfEdgeMomenta` induced by
    `F.edgeToHalfEdgeMomenta` and `F.vertexToHalfEdgeMomenta`. -/
-def edgeVertexToHalfEdgeMomenta : F.EdgeVertexMomenta →ₗ[ℝ] F.HalfEdgeMomenta :=
-  DirectSum.toModule ℝ (Fin 2) F.HalfEdgeMomenta
-    (fun i => match i with | 0 => F.edgeToHalfEdgeMomenta | 1 => F.vertexToHalfEdgeMomenta)
+noncomputable def edgeVertexToHalfEdgeMomenta : F.EdgeVertexMomenta →ₗ[ℝ] F.HalfEdgeMomenta :=
+  (DirectSum.toModule ℝ (Fin 2) F.HalfEdgeMomenta
+  (fun i => match i with | 0 => F.edgeToHalfEdgeMomenta | 1 => F.vertexToHalfEdgeMomenta))
+  ∘ₗ (DirectSum.linearEquivFunOnFintype ℝ (Fin 2) F.EdgeVertexMomentaMap).symm.toLinearMap
+
+lemma edgeVertexToHalfEdgeMomenta_apply_𝓔 (v : F.EdgeMomenta) :
+  F.edgeVertexToHalfEdgeMomenta (Pi.single 0 v) = F.edgeToHalfEdgeMomenta v := by
+  rw [← DirectSum.linearEquivFunOnFintype_lof ℝ ]
+  rw [edgeVertexToHalfEdgeMomenta]
+  simp only [LinearEquiv.coe_coe, LinearMap.coe_comp,
+    Function.comp_apply]
+  erw [LinearEquiv.symm_apply_apply ]
+  exact DirectSum.toModule_lof _ _ _
+
+lemma edgeVertexToHalfEdgeMomenta_apply_𝓥 (v : F.VertexMomenta) :
+  F.edgeVertexToHalfEdgeMomenta (Pi.single 1 v) = F.vertexToHalfEdgeMomenta v := by
+  rw [← DirectSum.linearEquivFunOnFintype_lof ℝ ]
+  rw [edgeVertexToHalfEdgeMomenta]
+  simp only [LinearEquiv.coe_coe, LinearMap.coe_comp,
+    Function.comp_apply]
+  erw [LinearEquiv.symm_apply_apply ]
+  exact DirectSum.toModule_lof _ _ _
+
+
+/-- The matrix corresponding to `edgeVertexToHalfEdgeMomentaMatrix` in the standard basis. -/
+@[simp]
+noncomputable def edgeVertexToHalfEdgeMomentaMatrix : Matrix F.𝓱𝓔 F.graphVertex ℝ  :=
+  (LinearMap.toMatrix F.basisEdgeVertexMomenta
+  (EuclideanSpace.basisFun F.𝓱𝓔 ℝ).toBasis) F.edgeVertexToHalfEdgeMomenta
+
+
+lemma edgeVertexToHalfEdgeMomentaMatrix_on_𝓔 (i : F.𝓱𝓔) (j : F.𝓔) :
+    F.edgeVertexToHalfEdgeMomentaMatrix i ⟨0, j⟩ = F.edgeToHalfEdgeMomentaMatrix i j := by
+  simp only [edgeVertexToHalfEdgeMomentaMatrix, edgeToHalfEdgeMomentaMatrix]
+  rw [LinearMap.toMatrix_apply, LinearMap.toMatrix_apply]
+  simp only [EuclideanSpace.basisFun, basisEdgeVertexMomenta,
+    OrthonormalBasis.coe_toBasis_repr_apply, LinearIsometryEquiv.coe_refl, id_eq, basisEdgeMomenta]
+  erw [Pi.basis_apply]
+  rw [← edgeVertexToHalfEdgeMomenta_apply_𝓔]
+  rfl
+
+lemma edgeVertexToHalfEdgeMomentaMatrix_on_𝓥 (i : F.𝓱𝓔) (j : F.𝓥) :
+    F.edgeVertexToHalfEdgeMomentaMatrix i ⟨1, j⟩ = F.vertexToHalfEdgeMomentaMatrix i j := by
+  simp only [edgeVertexToHalfEdgeMomentaMatrix, vertexToHalfEdgeMomentaMatrix]
+  rw [LinearMap.toMatrix_apply, LinearMap.toMatrix_apply]
+  simp only [EuclideanSpace.basisFun, basisEdgeVertexMomenta,
+    OrthonormalBasis.coe_toBasis_repr_apply, LinearIsometryEquiv.coe_refl, id_eq, basisEdgeMomenta]
+  erw [Pi.basis_apply]
+  rw [← edgeVertexToHalfEdgeMomenta_apply_𝓥]
+  rfl
+
+lemma edgeVertexToHalfEdgeMomentaMatrix_eq_incidenceMatrix :
+    F.edgeVertexToHalfEdgeMomentaMatrix = F.incidenceMatrix.map (Int.cast : ℤ → ℝ) := by
+  apply Matrix.ext
+  intro i ⟨j1, j2⟩
+  fin_cases j1
+  erw [edgeVertexToHalfEdgeMomentaMatrix_on_𝓔]
+  rw [edgeToHalfEdgeMomenta_eq_edgeToHalfEdgeℤ]
+  rfl
+  erw [edgeVertexToHalfEdgeMomentaMatrix_on_𝓥]
+  rw [vertexToHalfEdgeMomenta_eq_incidenceMatrix𝓥]
+  rfl
+
+lemma edgeVertexToHalfEdgeMomentaMatrix_mul_transpose_eq_adjacencyLinePlus2I :
+    F.edgeVertexToHalfEdgeMomentaMatrix * F.edgeVertexToHalfEdgeMomentaMatrix.transpose
+    = F.adjacencyLinePlus2I.map (Int.cast : ℤ → ℝ) := by
+  rw [edgeVertexToHalfEdgeMomentaMatrix_eq_incidenceMatrix]
+  refine Matrix.ext ?_
+  intro i j
+  rw [Matrix.map_apply]
+  rw [Matrix.mul_apply, adjacencyLinePlus2I, Matrix.mul_apply, Int.cast_sum]
+  apply Finset.sum_congr rfl
+  intro x _
+  simp only [Matrix.map_apply, Matrix.transpose_apply, Int.cast_mul]
+
+
 
 /-!
 
@@ -168,12 +359,12 @@ allowed momenta.
 
 /-- The submodule of `F.HalfEdgeMomenta` corresponding to the range of
  `F.edgeVertexToHalfEdgeMomenta`. -/
-def orthogHalfEdgeMomenta : Submodule ℝ F.HalfEdgeMomenta :=
+noncomputable def orthogHalfEdgeMomenta : Submodule ℝ F.HalfEdgeMomenta :=
   LinearMap.range F.edgeVertexToHalfEdgeMomenta
 
 /-- The submodule of `F.HalfEdgeMomenta` corresponding to the allowed momenta. -/
-def allowedHalfEdgeMomenta : Submodule ℝ F.HalfEdgeMomenta :=
-  Submodule.orthogonalBilin F.orthogHalfEdgeMomenta F.euclidInner
+noncomputable def allowedHalfEdgeMomenta : Submodule ℝ F.HalfEdgeMomenta :=
+  F.orthogHalfEdgeMomentaᗮ
 
 /-!
 
@@ -195,12 +386,31 @@ noncomputable def numberOfLoops : ℕ := FiniteDimensional.finrank ℝ F.allowed
 We now give a series of lemmas which be used to help calculate the number of loops
 for specific Feynman diagrams.
 
-### TODO
-
-- Complete this section.
+The lemma `numberOfLoops_eigenvectors` is particularly useful in calculating the number
+of loops for a given diagram.
 
 
 -/
+
+lemma numberOfLoops_eq_finrank_sub :
+    F.numberOfLoops = Fintype.card F.𝓱𝓔 - FiniteDimensional.finrank ℝ F.orthogHalfEdgeMomenta := by
+  apply Nat.eq_sub_of_add_eq
+  rw [numberOfLoops, allowedHalfEdgeMomenta, add_comm, Submodule.finrank_add_finrank_orthogonal]
+  exact finrank_euclideanSpace
+
+lemma numberOfLoops_eq_card_sub_rank :
+    F.numberOfLoops = Fintype.card F.𝓱𝓔 - F.edgeVertexToHalfEdgeMomentaMatrix.rank := by
+  rw [numberOfLoops_eq_finrank_sub, orthogHalfEdgeMomenta]
+  rw [Matrix.rank_eq_finrank_range_toLin _ (EuclideanSpace.basisFun F.𝓱𝓔 ℝ).toBasis
+    F.basisEdgeVertexMomenta]
+  erw [Matrix.toLin_toMatrix]
+
+lemma numberOfLoops_of_adjacencyLinePlus2I_rank :
+    F.numberOfLoops = Fintype.card F.𝓱𝓔 - (F.adjacencyLinePlus2I.map (Int.cast : ℤ → ℝ)).rank := by
+  rw [numberOfLoops_eq_card_sub_rank, ← Matrix.rank_self_mul_transpose,
+  edgeVertexToHalfEdgeMomentaMatrix_mul_transpose_eq_adjacencyLinePlus2I]
+
+
 
 /-!
 

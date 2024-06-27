@@ -3,7 +3,8 @@ Copyright (c) 2024 Joseph Tooby-Smith. All rights reserved.
 Released under Apache 2.0 license.
 Authors: Joseph Tooby-Smith
 -/
-import HepLean.FeynmanDiagrams.Basic
+import HepLean.FeynmanDiagrams.Momentum
+import HepLean.FeynmanDiagrams.Display
 /-!
 # Feynman diagrams in Phi^4 theory
 
@@ -89,6 +90,70 @@ lemma figureEight_connected : Connected figureEight := by decide
 /-- The symmetry factor of `figureEight` is 8. We can get this from
   `#eval symmetryFactor figureEight`. -/
 lemma figureEight_symmetryFactor : symmetryFactor figureEight = 8 := by decide
+
+/--
+  The number of loop of the `figureEight` Feynman diagram is `2`.
+  To prove this we use the matrix obtained from
+  `#eval figureEight.adjacencyLinePlus2IString (Equiv.refl _)`
+  and find its eigenvectors and eigenvalues in a computer algebra system
+  (such as Mathematica).
+  These eigvectors and eigenvalues are then put into the theory
+  `figureEight.numberOfLoops_eigenvectors` in the order
+  - eigenvectors with zero eigenvalues
+  - eigenvectors with non-zero eigenvalues
+  - corresponding non-zero eigenvalues.
+
+-/
+lemma figureEight_numberOfLoops : figureEight.numberOfLoops = 2 := by
+  rw [figureEight.numberOfLoops_eigenvectors ![![0, 0, -1, 1], ![-1, 1, 0, 0]]
+    ![![1, 1, 1, 1], ![-1, -1, 1, 1]] ![6, 2] (by decide) (by decide)]
+  decide
+
+/-
+A Feynman diagram can be displayed using e.g.:
+
+`#html figureEight.toDOTHTML (Equiv.refl _) (Equiv.refl _) (Equiv.refl _)`
+
+-/
+
+end Example
+/-!
+
+## A more complicated example
+
+
+-/
+
+section Example
+
+abbrev propogator : FeynmanDiagram phi4PreFeynmanRules :=
+  mk'
+    ![0, 0, 0, 0]
+    ![1, 1]
+    ![⟨0, 0, 0⟩, ⟨0, 0, 0⟩, ⟨0, 1, 0⟩, ⟨0, 1, 1⟩, ⟨0, 2, 0⟩, ⟨0, 2, 1⟩, ⟨0, 3, 1⟩, ⟨0, 3, 1⟩]
+    (by decide)
+
+
+#eval propogator.adjacencyLinePlus2IString (Equiv.refl _)
+
+def feynmanDiagramExample2 : FeynmanDiagram phi4PreFeynmanRules :=
+  mk'
+    ![0, 0, 0, 0, 0, 0, 0]
+    ![0, 0, 1, 1, 1]
+    ![⟨0, 0, 0⟩, ⟨0, 0, 1⟩,  ⟨0, 1, 2⟩, ⟨0, 1, 2⟩,
+    ⟨0, 2, 2⟩, ⟨0, 2, 3⟩, ⟨0, 3, 2⟩, ⟨0, 3, 3⟩, ⟨0, 4, 3⟩, ⟨0, 4, 3⟩,
+    ⟨0, 5, 4⟩, ⟨0, 5, 4⟩, ⟨0, 6, 4⟩, ⟨0, 6, 4⟩]
+    (by decide)
+
+instance : IsFiniteDiagram feynmanDiagramExample2 :=
+  FeynmanDiagram.instIsFiniteDiagramMk'OfFintypeOfDecidableEq _ _ _ _
+
+
+/-- `feynmanDiagramExample2` is not connected. We can get this from
+  `#eval Connected figureEight`. -/
+lemma feynmanDiagramExample2_connected : ¬ Connected feynmanDiagramExample2 := by decide
+
+
 
 end Example
 
